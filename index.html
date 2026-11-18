@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barcode Detector Remote</title>
+<!--
+  Barcode Detector Remote: laptop page for the Barcode Detector Android app.
+  One self-contained file: works from GitHub Pages or saved and opened offline in Chrome / Edge.
+  Connects with Web Bluetooth. Add ?demo to the address (or use Settings → Demo) to try it without a device.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f3f7; --panel: #ffffff; --ink: #1d1b20; --muted: #625b71; --line: #d9d6e0;
+  --accent: #6750a4; --accent-ink: #ffffff;
+  --match: #a6e22e; --match-border: #6fa80f; --partial: #ffe34d; --partial-border: #e0b800; --none: #e22e2e;
+  --radius: 14px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 14px; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.text { border: none; background: none; color: var(--accent); padding: 6px 8px; }
+button.danger { color: var(--none); }
+button.small { padding: 3px 10px; font-size: 13px; }
+input[type=text], input[type=password], input[type=number], input[type=search], textarea {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fff; width: 100%;
+}
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+[hidden] { display: none !important; }
+
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+.bar { max-width: 1200px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bar h1 { font-size: 17px; margin: 0; white-space: nowrap; }
+.status { display: flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; flex: 1; }
+.status b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #aaa; flex: none; }
+.dot.on { background: #2e9e4a; } .dot.busy { background: #e0a000; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+.signal { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.bars { display: inline-flex; gap: 2px; align-items: flex-end; height: 16px; }
+.bars i { width: 4px; background: var(--line); border-radius: 1px; }
+.bars i:nth-child(1) { height: 25%; } .bars i:nth-child(2) { height: 50%; } .bars i:nth-child(3) { height: 75%; } .bars i:nth-child(4) { height: 100%; }
+.bars.weak i.lit { background: var(--none); } .bars i.lit { background: #2e9e4a; }
+.ringing-chip { background: var(--none); color: #fff; border-color: var(--none); }
+
+.alarm { background: var(--none); color: #fff; }
+.alarm .bar { justify-content: space-between; font-weight: 600; }
+.alarm button { background: #fff; color: var(--none); border: none; font-weight: 700; }
+.banner { max-width: 1200px; margin: 10px auto 0; padding: 10px 14px; border-radius: 10px; background: #e9e4f5; }
+.banner.err { background: #fde2e1; color: #8c1d18; }
+
+main { max-width: 1200px; margin: 0 auto; padding: 14px 16px 60px; }
+.last { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; gap: 12px; align-items: center; }
+.last .lvl { width: 14px; height: 14px; border-radius: 50%; background: var(--line); flex: none; }
+.last .code { font: 600 20px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; word-break: break-all; white-space: pre-wrap; }
+.last .meta { color: var(--muted); font-size: 13px; }
+.last .grow { flex: 1; min-width: 0; }
+
+.tabs { display: flex; gap: 6px; margin: 16px 0 10px; border-bottom: 1px solid var(--line); }
+.tabs button { border: none; border-radius: 10px 10px 0 0; background: none; padding: 8px 14px; color: var(--muted); }
+.tabs button.on { color: var(--accent); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.toolbar input { max-width: 360px; }
+.toolbar .spacer { flex: 1; }
+.hint { color: var(--muted); padding: 18px 4px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; align-items: start; }
+.card { background: #f7f2fa; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 8px; color: #000; }
+.card.match { outline: 3px solid var(--match-border); outline-offset: -1px; }
+.card.partial { outline: 3px solid var(--partial-border); outline-offset: -1px; }
+.card.off .text { opacity: .5; }
+.card .head { display: flex; align-items: center; gap: 8px; }
+.card .title { font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .text { white-space: pre-wrap; word-break: break-word; margin: 6px 0; max-height: 13.5em; overflow: hidden; position: relative; }
+.card .text.open { max-height: none; }
+.card .text .hit { background: var(--match); border-radius: 4px; }
+.card.partial .text .hit { background: var(--partial); }
+.card .more { font-size: 12px; color: var(--accent); background: none; border: none; padding: 0; }
+.card .foot { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 11px; color: #555; }
+.card .foot .dates { flex: 1; min-width: 120px; }
+.card .foot button { font-size: 12px; padding: 2px 8px; background: rgba(255,255,255,.55); border-color: rgba(0,0,0,.15); }
+.switch { position: relative; width: 34px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: #b9b5c0; border-radius: 20px; transition: .15s; cursor: pointer; }
+.switch span::before { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::before { transform: translateX(14px); }
+
+.log { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.logrow { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); }
+.logrow:first-child { border-top: none; }
+.logrow .lvl { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.logrow .code { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+.logrow .meta { color: var(--muted); font-size: 13px; }
+.logrow .grow { flex: 1; min-width: 0; }
+.logrow .counts { font-size: 13px; white-space: nowrap; }
+
+dialog { border: none; border-radius: 18px; padding: 0; max-width: min(640px, 94vw); width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+dialog::backdrop { background: rgba(20,16,30,.45); }
+.dlg { padding: 12px 14px 8px; }
+.dlg h2 { font-size: 16px; margin: 0 0 8px; }
+.dlg .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.dlg .actions { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.dlg .actions .spacer { flex: 1; }
+.dlg textarea { min-height: 260px; resize: vertical; font-family: inherit; background: rgba(255,255,255,.6); }
+.dlg input[type=text] { background: rgba(255,255,255,.6); }
+.dlg section { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.dlg section h3 { font-size: 14px; margin: 0 0 6px; color: var(--accent); }
+.dlg .note { font-size: 12px; color: var(--muted); }
+.dlg input[type=number] { width: 84px; }
+.swatches { display: grid; grid-template-columns: repeat(5, 46px); gap: 10px; justify-content: space-between; margin: 8px 0 12px; }
+.swatch { width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); padding: 0; position: relative; }
+.swatch.sel { border: 3px solid var(--accent); }
+.swatch.sel::after { content: "✓"; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; color: #000; }
+.swatch.none { background: #fff; color: #888; }
+.hue { width: 100%; height: 26px; -webkit-appearance: none; appearance: none; border-radius: 12px; border: 1px solid rgba(0,0,0,.2); }
+.hue::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); background: var(--thumb, #ccc); }
+.preview { width: 96px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-weight: 600; border: 1px solid rgba(0,0,0,.2); color: #000; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #322f37; color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 50; max-width: 90vw; }
+.demo { background: #fff6d6; border: 1px dashed #c9a400; border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <h1>Barcode Detector Remote</h1>
+    <div class="status"><span id="dot" class="dot"></span><b id="statusText">Not connected</b></div>
+    <span class="signal" title="Signal strength measured by the device"><span id="bars" class="bars"><i></i><i></i><i></i><i></i></span><span id="rssiText">–</span></span>
+    <button id="ringChip" class="ringing-chip small" hidden>🔔 Device ringing · Stop</button>
+    <button id="connectBtn" class="primary">Connect to device</button>
+    <button id="disconnectBtn" hidden>Disconnect</button>
+    <button id="settingsBtn" title="Settings">⚙ Settings</button>
+  </div>
+  <div id="alarmBar" class="alarm" hidden>
+    <div class="bar"><span id="alarmText">⚠ Device left behind?</span><button id="alarmStop">STOP BEEPING</button></div>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <div id="demoBar" class="demo" hidden>
+    <b>Demo mode</b> – no real device. Simulated signal:
+    <input id="demoRssi" type="range" min="-100" max="-40" value="-55" style="width:160px"> <span id="demoRssiText">-55 dBm</span>
+    <button class="small" id="demoScan">Simulate a scan</button>
+    <button class="small" id="demoDrop">Drop connection</button>
+    <button class="small" id="demoStop">Press STOP on device</button>
+  </div>
+
+  <div class="last">
+    <span id="lastLvl" class="lvl"></span>
+    <div class="grow">
+      <div class="meta" id="lastMeta">Last scanned</div>
+      <div class="code" id="lastCode">none yet</div>
+    </div>
+    <button id="copyLast" class="primary" disabled>Copy</button>
+  </div>
+
+  <div class="tabs">
+    <button data-tab="D" class="on">Detector <span id="countD"></span></button>
+    <button data-tab="O">Objects <span id="countO"></span></button>
+    <button data-tab="L">Log</button>
+  </div>
+
+  <section id="notesView">
+    <div class="toolbar">
+      <input id="filter" type="search" placeholder="Filter these notes">
+      <span class="spacer"></span>
+      <button id="addBtn" class="primary" disabled>+ New note</button>
+    </div>
+    <div id="notes" class="grid"></div>
+    <div id="notesHint" class="hint"></div>
+  </section>
+
+  <section id="logView" hidden>
+    <div class="toolbar">
+      <input id="logQuery" type="search" placeholder="Search the device's scan log (barcode or text)">
+      <button id="logSearch" class="primary" disabled>Search</button>
+      <span id="logInfo" class="meta"></span>
+    </div>
+    <div id="logList" class="log" hidden></div>
+    <div id="logHint" class="hint">Type a barcode (or part of it) and press Enter. The search runs on the device, so the whole log is searched.</div>
+  </section>
+</main>
+
+<!-- note editor -->
+<dialog id="editDlg"><div class="dlg" id="editBox">
+  <h2 id="editTitle">Edit note</h2>
+  <input id="editName" type="text" placeholder="Title (empty = first line of the note)">
+  <div style="height:8px"></div>
+  <textarea id="editText" placeholder="SKU&#10;Description&#10;Barcode 1&#10;Barcode 2"></textarea>
+  <div class="actions">
+    <button class="text" id="editColour">Change colour</button>
+    <span class="spacer"></span>
+    <button class="text" id="editCancel">Cancel</button>
+    <button class="text" id="editSave">Save</button>
+  </div>
+</div></dialog>
+
+<!-- colour window -->
+<dialog id="colourDlg" style="max-width:380px"><div class="dlg">
+  <h2>Note colour</h2>
+  <div class="swatches" id="swatches"></div>
+  <div style="font-size:13px;font-weight:600;margin-bottom:6px">Custom</div>
+  <input id="hue" class="hue" type="range" min="0" max="359" value="200">
+  <div class="row"><div class="preview" id="huePreview">Aa 123</div><span class="spacer" style="flex:1"></span><button class="text" id="useCustom">Use custom</button></div>
+  <div class="actions"><span class="spacer"></span><button class="text" id="colourCancel">Cancel</button></div>
+</div></dialog>
+
+<!-- settings -->
+<dialog id="settingsDlg"><div class="dlg">
+  <h2>Settings</h2>
+
+  <section style="border:none;margin:0;padding:0">
+    <h3>Find device</h3>
+    <div class="row">
+      <button id="findBtn" class="primary" disabled>🔊 Find device</button>
+      <span class="note">Device rings at full volume (also on silent), vibrates and flashes its light. Stops after 2 minutes.</span>
+    </div>
+  </section>
+
+  <section>
+    <h3>Left-behind alarm</h3>
+    <label class="row"><input type="checkbox" id="lbOn"> Beep on this laptop when the device goes too far away</label>
+    <div class="row">Beep when weaker than <input type="number" id="lbThr" min="-110" max="-30"> dBm for <input type="number" id="lbDelay" min="1" max="60"> seconds
+      <button class="small" id="lbUseNow">Use current signal</button></div>
+    <div class="row">If the connection is lost completely, beep for <input type="number" id="lostSec" min="3" max="600"> seconds, then stop</div>
+    <div class="note">You can stop the beeping here or on the device (it buzzes and shows a STOP button). After a stop it stays quiet until the device comes back in range.</div>
+  </section>
+
+  <section>
+    <h3>Connection</h3>
+    <div class="row">Link password <input type="password" id="pw" style="max-width:220px" placeholder="only if set on the device"></div>
+    <div class="note" id="persistInfo"></div>
+  </section>
+
+  <section>
+    <h3>Demo</h3>
+    <div class="row"><button class="small" id="demoBtn">Start demo (no device needed)</button>
+      <span class="note">Try the page with a simulated device.</span></div>
+  </section>
+
+  <div class="actions"><span class="spacer"></span><button class="text" id="settingsClose">Close</button></div>
+</div></dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>
+'use strict';
+// ================================================================ constants (must match the app's LinkService)
+const SERVICE = 'b7d2a000-5c3e-4f8a-9d61-2e4c8a1f7b30';
+const TX = 'b7d2a001-5c3e-4f8a-9d61-2e4c8a1f7b30';   // device -> laptop (notify)
+const RX = 'b7d2a002-5c3e-4f8a-9d61-2e4c8a1f7b30';   // laptop -> device (write)
+// Pastel presets, same as the app (ARGB).
+const PRESETS = [0xFFF8B4AE, 0xFFF6C08E, 0xFFFFF1A6, 0xFFE6F2A8, 0xFFD7F0C2, 0xFFB9E2D8, 0xFFBDE8EE,
+                 0xFFCFE3F0, 0xFFB3CBE8, 0xFFCBCBF2, 0xFFD6C6E8, 0xFFF5D3E2, 0xFFE6DCCB, 0xFFE2E3E6].map(c => c | 0);
+const CUSTOM_S = 0.75, CUSTOM_L = 0.85;  // custom colours: same saturation and lightness as the app
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+// ================================================================ settings (saved in this browser)
+const DEFAULTS = { pw: '', lbOn: 'on', lbThr: '-70', lbDelay: '2', lostSec: '10' };
+function getS(k) { try { const v = localStorage.getItem('bdr-' + k); return v === null ? DEFAULTS[k] : v; } catch (e) { return DEFAULTS[k]; } }
+function setS(k, v) { try { localStorage.setItem('bdr-' + k, v); } catch (e) {} }
+const S = {
+  get pw() { return getS('pw'); },
+  get lbOn() { return getS('lbOn') === 'on'; },
+  get lbThr() { const n = Number(getS('lbThr')); return Number.isFinite(n) ? n : -70; },
+  get lbDelay() { return Math.max(1, Number(getS('lbDelay')) || 2) * 1000; },
+  get lostSec() { return Math.max(3, Number(getS('lostSec')) || 10); },
+};
+
+// ================================================================ small helpers
+let toastTimer = null;
+function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.hidden = true, 2600); }
+function setStatus(text, state) { $('statusText').textContent = text; $('dot').className = 'dot' + (state ? ' ' + state : ''); }
+function banner(text, err) { const b = $('banner'); b.textContent = text || ''; b.hidden = !text; b.className = 'banner' + (err ? ' err' : ''); }
+function withTimeout(p, ms) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]); }
+async function sha256hex(s) {
+  const d = await crypto.subtle.digest('SHA-256', enc.encode(s));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch (e) {  // older or restricted browsers
+    const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  toast('Copied: ' + (t.length > 60 ? t.slice(0, 60) + '…' : t));
+}
+function pad(n) { return String(n).padStart(2, '0'); }
+function fmtDate(ts) { const d = new Date(ts); return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear(); }
+function fmtTime(ts) { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+function isToday(ts) { return new Date(ts).toDateString() === new Date().toDateString(); }
+function shortWhen(ts) { return isToday(ts) ? fmtTime(ts).slice(0, 5) : fmtDate(ts).replace(/\.(\d\d)(\d\d)$/, '.$2'); }
+function cssColor(argb) { if (!argb) return ''; return '#' + ((argb >>> 0) & 0xFFFFFF).toString(16).padStart(6, '0'); }
+function hslToArgb(h, s, l) {
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
+  return ((0xFF << 24) | (f(0) << 16) | (f(8) << 8) | f(4)) | 0;
+}
+function hueOf(argb) {
+  const r = ((argb >>> 16) & 255) / 255, g = ((argb >>> 8) & 255) / 255, b = (argb & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  if (!d) return 200;
+  let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60; return h < 0 ? h + 360 : h;
+}
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function btn(label, fn, cls) { const b = el('button', cls || 'small', label); b.onclick = fn; return b; }
+
+// ================================================================ app state
+let notes = [];          // all notes from the device, newest first
+let tab = 'D';
+let lastScan = null;     // { b, lvl, ts, m }
+let scanCount = 0;
+let findRinging = false;
+
+// ================================================================ link: real Bluetooth device
+let ready = false;       // connected AND logged in
+let demo = null;         // DemoDevice when in demo mode
+const Ble = {
+  device: null, rx: null, tx: null, chunk: 19, inBuf: [], writeChain: Promise.resolve(),
+  keepTrying: false, connecting: false, manualDisconnect: false, retryTimer: null, failCount: 0, helloWaiter: null,
+
+  async choose() {
+    if (!navigator.bluetooth) { banner('This browser has no Web Bluetooth. Use Google Chrome or Microsoft Edge.', true); return; }
+    try {
+      const d = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+      this.use(d);
+      this.failCount = 0;
+      this.startTrying();
+    } catch (e) {
+      if (e.name !== 'NotFoundError') setStatus('Connect failed: ' + e.message, '');
+    }
+  },
+  use(d) {
+    this.device = d;
+    if (!d._bdr) { d.addEventListener('gattserverdisconnected', () => this.onDisconnected()); d._bdr = true; }
+    updateButtons();
+  },
+  startTrying() {
+    if (!this.device) return;
+    this.keepTrying = true; this.manualDisconnect = false;
+    updateButtons();
+    this.tryConnect();
+  },
+  async tryConnect() {
+    clearTimeout(this.retryTimer);
+    if (!this.keepTrying || this.connecting || ready || !this.device) return;
+    this.connecting = true;
+    setStatus('Connecting to ' + (this.device.name || 'device') + '…', 'busy');
+    try {
+      await withTimeout(this.openGatt(), 20000);
+    } catch (e) {
+      try { if (this.device.gatt.connected) this.device.gatt.disconnect(); } catch (_) {}
+      if (++this.failCount === 15 && this.keepTrying)
+        banner('Still can\'t reach the device. Check that its "Bluetooth link to laptop" is on (app ⚙ Settings). ' +
+               'If it was restarted, Chrome may not recognise it any more: click "Choose device again".');
+      if (this.keepTrying) setStatus('Device not in range – trying again…', 'busy');
+    }
+    this.connecting = false;
+    if (this.keepTrying && !ready) this.retryTimer = setTimeout(() => this.tryConnect(), 3000);
+  },
+  async openGatt() {
+    const server = await this.device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE);
+    this.tx = await service.getCharacteristic(TX);
+    this.rx = await service.getCharacteristic(RX);
+    if (!this.tx._bdr) { this.tx.addEventListener('characteristicvaluechanged', ev => this.onPacket(ev)); this.tx._bdr = true; }
+    await this.tx.startNotifications();
+    this.inBuf = []; this.chunk = 19; this.writeChain = Promise.resolve();
+    const done = new Promise((res, rej) => { this.helloWaiter = { res, rej }; });
+    await this.rawSend({ t: 'hi' });
+    await withTimeout(done, 8000);   // resolved when the device accepted us
+  },
+  onPacket(ev) {
+    const dv = ev.target.value, v = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+    if (!v.length) return;
+    for (let i = 1; i < v.length; i++) this.inBuf.push(v[i]);
+    if (v[0] !== 0) return;  // more to come
+    const json = dec.decode(new Uint8Array(this.inBuf)); this.inBuf = [];
+    let msg; try { msg = JSON.parse(json); } catch (e) { return; }
+    if (msg.t === 'hello') this.onHello(msg);
+    else if (msg.t === 'auth') this.onAuth(msg);
+    else onMessage(msg);
+  },
+  async onHello(msg) {
+    if (msg.mtu) this.chunk = Math.max(19, Math.min(msg.mtu - 3, 500) - 1);
+    if (!msg.auth) { this.loggedIn(); return; }
+    if (!S.pw) { this.loginFailed('This device has a link password. Enter it in ⚙ Settings, then connect again.'); return; }
+    const h = await sha256hex(msg.nonce + ':' + await sha256hex(S.pw));
+    this.rawSend({ t: 'auth', h });
+  },
+  onAuth(msg) {
+    if (msg.ok) this.loggedIn();
+    else this.loginFailed(msg.locked ? 'Too many wrong passwords – the device is locked for 1 minute.' : 'Wrong link password – check ⚙ Settings, then connect again.');
+  },
+  loggedIn() {
+    if (this.helloWaiter) { this.helloWaiter.res(); this.helloWaiter = null; }
+    this.failCount = 0;
+    linkUp(this.device.name || 'device');
+  },
+  loginFailed(text) {
+    this.keepTrying = false;   // retrying would only lock the device
+    if (this.helloWaiter) { this.helloWaiter.rej(new Error('login')); this.helloWaiter = null; }
+    setStatus('Login failed', '');
+    banner(text, true);
+    try { this.device.gatt.disconnect(); } catch (e) {}
+    updateButtons();
+  },
+  onDisconnected() {
+    this.rx = null; this.tx = null;
+    if (this.helloWaiter) { this.helloWaiter.rej(new Error('disconnected')); this.helloWaiter = null; }
+    const unexpected = !this.manualDisconnect && this.keepTrying;
+    this.manualDisconnect = false;
+    linkDown(unexpected);
+    if (unexpected && !this.connecting) this.retryTimer = setTimeout(() => this.tryConnect(), 1000);
+  },
+  disconnect() {
+    this.keepTrying = false; this.manualDisconnect = true;
+    clearTimeout(this.retryTimer);
+    if (this.device && this.device.gatt.connected) this.device.gatt.disconnect();
+    else { this.manualDisconnect = false; linkDown(false); }
+    updateButtons();
+  },
+  rawSend(obj) {
+    const bytes = enc.encode(JSON.stringify(obj));
+    this.writeChain = this.writeChain.then(async () => {
+      if (!this.rx) return;
+      for (let pos = 0; pos < bytes.length; pos += this.chunk) {
+        const part = bytes.slice(pos, pos + this.chunk), pkt = new Uint8Array(part.length + 1);
+        pkt[0] = pos + this.chunk >= bytes.length ? 0 : 1;
+        pkt.set(part, 1);
+        if (this.rx.writeValueWithResponse) await this.rx.writeValueWithResponse(pkt); else await this.rx.writeValue(pkt);
+      }
+    }).catch(e => console.warn('send failed', e));
+    return this.writeChain;
+  },
+};
+
+function send(obj) {
+  if (!ready) { toast('Not connected'); return; }
+  if (demo) demo.receive(obj); else Ble.rawSend(obj);
+}
+
+function linkUp(name) {
+  ready = true;
+  setStatus('Connected to ' + name, 'on');
+  banner('');
+  if (lostReason === 'disconnect') lostAlarmStop();
+  updateButtons();
+  send({ t: 'sync' });
+  if ($('logQuery').value.trim()) runLogSearch();
+}
+
+function linkDown(unexpected) {
+  const wasReady = ready;
+  ready = false;
+  setFindRinging(false);
+  updateButtons();
+  if (!unexpected) { setStatus('Not connected', ''); clearSignal(); if (lostReason) lostAlarmStop(); return; }
+  setStatus('Connection lost – reconnecting…', 'busy');
+  clearSignal();
+  if (lostReason === 'signal') {        // already beeping for weak signal: switch to "lost", which stops by itself
+    lostAlarmStop(false);
+    lostAlarmStart('disconnect', 0);
+  } else if (wasReady && S.lbOn) {
+    lostAlarmStart('disconnect', 5);    // 5 s grace for short hiccups
+  }
+}
+
+function updateButtons() {
+  const trying = demo ? false : Ble.keepTrying;
+  $('connectBtn').hidden = ready;
+  $('connectBtn').textContent = demo ? 'Reconnect demo' : !Ble.device ? 'Connect to device' : trying ? 'Choose device again' : 'Connect';
+  $('disconnectBtn').hidden = !(ready || trying);
+  $('disconnectBtn').textContent = ready ? 'Disconnect' : 'Stop searching';
+  $('addBtn').disabled = !ready;
+  $('logSearch').disabled = !ready;
+  $('findBtn').disabled = !ready;
+  document.querySelectorAll('[data-needs-link]').forEach(b => b.disabled = !ready);
+}
+
+// ================================================================ messages from the device
+function onMessage(msg) {
+  switch (msg.t) {
+    case 'notes': notes = msg.notes || []; renderNotes(); break;
+    case 'scan': onScan(msg); break;
+    case 'alarm': setFindRinging(!!msg.on); break;
+    case 'rssi': addSample(msg.v); break;
+    case 'lbstop': if (lostReason) { snoozed = true; lostAlarmStop(false); toast('Stopped on the device'); } break;
+    case 'logres': showLogResults(msg); break;
+    case 'copyres': onCopyResult(msg); break;
+  }
+}
+
+function onScan(msg) {
+  lastScan = msg;
+  if (!msg.old) scanCount++;
+  renderLast();
+  renderNotesSoon();   // highlight matched notes
+}
+
+function renderLast() {
+  const s = lastScan;
+  $('copyLast').disabled = !s;
+  if (!s) { $('lastCode').textContent = 'none yet'; $('lastMeta').textContent = 'Last scanned'; $('lastLvl').style.background = ''; return; }
+  $('lastCode').textContent = s.b;
+  $('lastLvl').style.background = s.lvl === 'E' ? 'var(--match)' : s.lvl === 'P' ? 'var(--partial)' : 'var(--none)';
+  const what = s.lvl === 'E' ? 'Match' : s.lvl === 'P' ? 'Partial match' : 'No match';
+  $('lastMeta').textContent = 'Last scanned · ' + what + ' · ' + fmtTime(s.ts) + (scanCount ? ' · ' + scanCount + ' scans this session' : '');
+}
+
+// ================================================================ notes
+let renderPending = false;
+function renderNotesSoon() { if (!renderPending) { renderPending = true; requestAnimationFrame(() => { renderPending = false; renderNotes(); }); } }
+
+function renderNotes() {
+  $('countD').textContent = '(' + notes.filter(n => n.loc === 'D').length + ')';
+  $('countO').textContent = '(' + notes.filter(n => n.loc === 'O').length + ')';
+  if (tab === 'L') return;
+  const q = $('filter').value.trim().toLowerCase();
+  const list = notes.filter(n => n.loc === tab && (!q || n.text.toLowerCase().includes(q) || n.title.toLowerCase().includes(q)));
+  const box = $('notes');
+  box.replaceChildren(...list.map(noteCard));
+  $('notesHint').textContent = !ready && !notes.length ? 'Connect to the device to see its notes.'
+    : !list.length ? (q ? 'No notes contain "' + q + '".' : 'No notes in ' + (tab === 'D' ? 'Detector' : 'Objects') + ' yet.') : '';
+}
+
+function noteCard(n) {
+  const c = el('div', 'card');
+  if (n.color) c.style.background = cssColor(n.color);
+  if (!n.en) c.classList.add('off');
+  if (lastScan && (lastScan.m || []).includes(n.id)) c.classList.add(lastScan.lvl === 'E' ? 'match' : 'partial');
+
+  const head = el('div', 'head');
+  head.append(el('div', 'title', n.title || '(empty)'));
+  const sw = el('label', 'switch'); sw.title = n.en ? 'Searched by the detector' : 'Not searched';
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = n.en; cb.dataset.needsLink = '1'; cb.disabled = !ready;
+  cb.onchange = () => send({ t: 'en', id: n.id, on: cb.checked });
+  sw.append(cb, el('span'));
+  head.append(sw);
+
+  const text = el('div', 'text');
+  const matched = lastScan && (lastScan.m || []).includes(n.id);
+  const needle = matched ? lastScan.b.trim().toLowerCase() : '';
+  let hit = null;
+  n.text.split('\n').forEach((line, i, all) => {
+    const span = el('span', null, line + (i < all.length - 1 ? '\n' : ''));
+    if (needle && line.trim().toLowerCase() === needle) { span.className = 'hit'; hit = hit || span; }
+    text.append(span);
+  });
+  // Like the app: centre the matched line inside the note.
+  if (hit) requestAnimationFrame(() => { text.scrollTop = hit.offsetTop - text.clientHeight / 2 + hit.offsetHeight / 2; });  // .text is the offset parent
+  const more = el('button', 'more', 'Show all');
+  more.hidden = n.text.split('\n').length <= 9 && n.text.length < 500;
+  more.onclick = () => { text.classList.toggle('open'); more.textContent = text.classList.contains('open') ? 'Show less' : 'Show all'; };
+
+  const foot = el('div', 'foot');
+  foot.append(el('span', 'dates', 'Created ' + shortWhen(n.cr) + (n.lm ? ' · Matched ' + shortWhen(n.lm) : '') + (n.en ? '' : ' · Not searched')));
+  const other = n.loc === 'D' ? 'Objects' : 'Detector';
+  foot.append(
+    btn('Copy text', () => copyText(n.text)),
+    linkBtn('Edit', () => openEditor(n)),
+    linkBtn('Copy to ' + other, () => send({ t: 'copy', id: n.id })),
+    linkBtn('Delete', () => { if (confirm('Delete this note?\n\n' + n.title)) send({ t: 'del', id: n.id }); }, 'small danger'),
+  );
+  c.append(head, text, more, foot);
+  return c;
+}
+function linkBtn(label, fn, cls) { const b = btn(label, fn, cls); b.dataset.needsLink = '1'; b.disabled = !ready; return b; }
+
+function onCopyResult(msg) {
+  const n = notes.find(x => x.id === msg.id), other = n && n.loc === 'D' ? 'Objects' : 'Detector';
+  if (msg.r === 'copied') toast('Copied to ' + other);
+  else if (msg.r === 'same') toast('Already in ' + other + ' with the same text. Not copied.');
+  else if (msg.r === 'conflict' && confirm(other + ' already has "' + msg.title + '" with different text.\nReplace it with this version? The note here stays as it is.'))
+    send({ t: 'over', id: msg.id, other: msg.other });
+}
+
+// ---- editor (same layout as the app: Change colour · Cancel · Save)
+let editing = null, editColour = 0;
+function openEditor(n) {
+  editing = n || null;
+  editColour = n ? n.color : PRESETS[Math.floor(Math.random() * PRESETS.length)];
+  $('editTitle').textContent = n ? 'Edit note' : 'New note';
+  $('editName').value = n && n.custom ? n.title : '';
+  $('editText').value = n ? n.text : '';
+  paintEditor();
+  $('editDlg').showModal();
+  const ta = $('editText'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+function paintEditor() { $('editBox').style.background = cssColor(editColour) || '#fff'; }
+$('editCancel').onclick = () => $('editDlg').close();
+$('editSave').onclick = () => {
+  const text = $('editText').value.replace(/\s+$/, ''), title = $('editName').value.trim();
+  if (!text.trim()) { toast('The note is empty'); return; }
+  if (!editing) {
+    send({ t: 'add', loc: tab === 'O' ? 'O' : 'D', text, color: editColour });
+    if (title) toast('Title can be set after the note appears');
+  } else {
+    if (text !== editing.text || editColour !== editing.color) send({ t: 'edit', id: editing.id, text, color: editColour });
+    const oldTitle = editing.custom ? editing.title : '';
+    if (title !== oldTitle) send({ t: 'title', id: editing.id, title });
+  }
+  $('editDlg').close();
+};
+$('editDlg').addEventListener('cancel', e => {   // Esc: don't lose typed text by accident
+  const changed = editing ? $('editText').value !== editing.text : $('editText').value.trim() !== '';
+  if (changed && !confirm('Discard your changes?')) e.preventDefault();
+});
+$('addBtn').onclick = () => openEditor(null);
+
+// ---- colour window
+function buildSwatches() {
+  const box = $('swatches'); box.replaceChildren();
+  [0, ...PRESETS].forEach(c => {
+    const s = el('button', 'swatch' + (c ? '' : ' none'), c ? '' : '⌀');
+    if (c) s.style.background = cssColor(c);
+    if (c === editColour) s.classList.add('sel');
+    s.title = c ? '' : 'No colour';
+    s.onclick = () => { editColour = c; paintEditor(); $('colourDlg').close(); };
+    box.append(s);
+  });
+}
+function paintHue() {
+  const h = Number($('hue').value), c = cssColor(hslToArgb(h, CUSTOM_S, CUSTOM_L));
+  $('huePreview').style.background = c;
+  $('hue').style.setProperty('--thumb', c);
+}
+(function paintRainbow() {
+  const stops = []; for (let h = 0; h <= 360; h += 30) stops.push(`hsl(${h} ${CUSTOM_S * 100}% ${CUSTOM_L * 100}%)`);
+  $('hue').style.background = `linear-gradient(to right, ${stops.join(',')})`;
+})();
+$('editColour').onclick = () => { buildSwatches(); $('hue').value = editColour ? Math.round(hueOf(editColour)) : 200; paintHue(); $('colourDlg').showModal(); };
+$('hue').oninput = paintHue;
+$('useCustom').onclick = () => { editColour = hslToArgb(Number($('hue').value), CUSTOM_S, CUSTOM_L); paintEditor(); $('colourDlg').close(); };
+$('colourCancel').onclick = () => $('colourDlg').close();
+
+// ================================================================ log search (runs on the device)
+function runLogSearch() {
+  const q = $('logQuery').value.trim();
+  if (!q) { $('logList').hidden = true; $('logInfo').textContent = ''; $('logHint').hidden = false; return; }
+  $('logInfo').textContent = 'Searching…';
+  send({ t: 'log', q });
+}
+function showLogResults(msg) {
+  if (msg.q.trim() !== $('logQuery').value.trim()) return;   // an older search
+  const list = $('logList');
+  $('logHint').hidden = msg.items.length > 0;
+  $('logHint').textContent = msg.items.length ? '' : 'No log entries contain "' + msg.q + '".';
+  list.hidden = !msg.items.length;
+  $('logInfo').textContent = msg.total > msg.items.length ? `Newest ${msg.items.length} of ${msg.total} matches` : msg.total + ' match' + (msg.total === 1 ? '' : 'es');
+  list.replaceChildren(...msg.items.map(e => {
+    const r = el('div', 'logrow');
+    const dot = el('span', 'lvl'); dot.style.background = e.m ? 'var(--match)' : e.p ? 'var(--partial)' : 'var(--none)';
+    const mid = el('div', 'grow');
+    const count = e.m + e.p + e.n;
+    const when = fmtDate(e.f) + ' ' + fmtTime(e.f) + (count > 1 ? ' → ' + fmtTime(e.l) + ' · scanned ' + count + '×' : '');
+    mid.append(el('div', 'code', e.b), el('div', 'meta', when));
+    const counts = el('span', 'counts', [e.m && '✓' + e.m, e.p && '~' + e.p, e.n && '✗' + e.n].filter(Boolean).join(' '));
+    const line = fmtDate(e.f) + ' ' + fmtTime(e.f) + (count > 1 ? '–' + fmtTime(e.l) : '') + '  ' + e.b + (count > 1 ? '  (×' + count + ')' : '');
+    r.append(dot, mid, counts, btn('Copy', () => copyText(e.b)), btn('Copy with date', () => copyText(line)));
+    return r;
+  }));
+}
+$('logSearch').onclick = runLogSearch;
+$('logQuery').addEventListener('keydown', e => { if (e.key === 'Enter') runLogSearch(); });
+$('logQuery').addEventListener('input', () => { if (!$('logQuery').value.trim()) runLogSearch(); });
+
+// ================================================================ signal strength (measured by the device, sent every second)
+let samples = [], lastSample = 0, currentRssi = null;
+function addSample(rssi) {
+  const now = Date.now();
+  lastSample = now;
+  samples.push([now, rssi]);
+  samples = samples.filter(s => now - s[0] < 3000);   // average of the last 3 seconds
+  currentRssi = Math.round(samples.reduce((a, s) => a + s[1], 0) / samples.length);
+  showSignal();
+  checkLeftBehind();
+}
+function clearSignal() { samples = []; currentRssi = null; lastSample = 0; weakSince = null; showSignal(); }
+function showSignal() {
+  const r = currentRssi, bars = $('bars');
+  const n = r === null ? 0 : r >= -55 ? 4 : r >= -65 ? 3 : r >= -75 ? 2 : r >= -85 ? 1 : 0;
+  [...bars.children].forEach((b, i) => b.classList.toggle('lit', i < n));
+  bars.classList.toggle('weak', r !== null && r < S.lbThr);
+  $('rssiText').textContent = r === null ? '–' : r + ' dBm';
+}
+setInterval(() => {   // no reading for 6 s: forget the old value
+  if (lastSample && Date.now() - lastSample > 6000 && currentRssi !== null) { samples = []; currentRssi = null; showSignal(); }
+}, 1000);
+
+// ================================================================ left-behind alarm (beeps on this laptop)
+let weakSince = null, snoozed = false;
+function checkLeftBehind() {
+  if (!S.lbOn || !ready || currentRssi === null) return;
+  const now = Date.now();
+  if (currentRssi < S.lbThr) {
+    if (weakSince === null) weakSince = now;
+    if (now - weakSince >= S.lbDelay && !snoozed && !lostReason) lostAlarmStart('signal', 0);
+  } else if (currentRssi >= S.lbThr + 3) {   // back in range (a little hysteresis)
+    weakSince = null; snoozed = false;
+    if (lostReason === 'signal') lostAlarmStop();
+  }
+}
+
+let audioCtx = null, lostSource = null, lostReason = null, titleTimer = null, lostTimer = null;
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) {}
+}
+document.addEventListener('pointerdown', unlockAudio);
+document.addEventListener('keydown', unlockAudio);
+function beepBuffer() {
+  const sr = audioCtx.sampleRate, buf = audioCtx.createBuffer(1, Math.round(sr * 1.2), sr), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) {
+    const t = i / sr, slot = Math.floor(t / 0.2);
+    const on = slot < 5 && slot % 2 === 0 && (t % 0.2) < 0.15;
+    d[i] = on ? (Math.sin(2 * Math.PI * 2000 * t) > 0 ? 0.5 : -0.5) : 0;
+  }
+  return buf;
+}
+function lostAlarmStart(reason, delaySec) {
+  if (lostReason) return;
+  lostReason = reason;
+  try {
+    unlockAudio();
+    lostSource = audioCtx.createBufferSource();
+    lostSource.buffer = beepBuffer(); lostSource.loop = true;
+    lostSource.connect(audioCtx.destination);
+    lostSource.start(audioCtx.currentTime + (delaySec || 0));
+  } catch (e) { lostSource = null; }
+  $('alarmText').textContent = reason === 'signal'
+    ? '⚠ Device left behind? Signal is weaker than ' + S.lbThr + ' dBm'
+    : '⚠ Connection to the device lost';
+  $('alarmBar').hidden = false;
+  let flip = false;
+  titleTimer = setInterval(() => { flip = !flip; document.title = flip ? '⚠ DEVICE LEFT BEHIND' : 'Barcode Detector Remote'; }, 1000);
+  if (reason === 'signal') send({ t: 'lb', on: true });            // device buzzes and shows STOP
+  else lostTimer = setTimeout(() => lostAlarmStop(false), (delaySec + S.lostSec) * 1000);   // device can't be reached: stop by itself
+}
+function lostAlarmStop(tellDevice = true) {
+  if (!lostReason) return;
+  const reason = lostReason;
+  try { if (lostSource) lostSource.stop(); } catch (e) {}
+  lostSource = null; lostReason = null;
+  clearTimeout(lostTimer); clearInterval(titleTimer);
+  document.title = 'Barcode Detector Remote';
+  $('alarmBar').hidden = true;
+  if (reason === 'signal' && tellDevice && ready) send({ t: 'lb', on: false });
+}
+$('alarmStop').onclick = () => { if (lostReason === 'signal') snoozed = true; lostAlarmStop(); };
+
+// ================================================================ find device
+function setFindRinging(on) {
+  findRinging = on;
+  $('findBtn').textContent = on ? '🔕 Stop device alarm' : '🔊 Find device';
+  $('ringChip').hidden = !on;
+}
+$('findBtn').onclick = () => send({ t: findRinging ? 'stopfind' : 'find' });
+$('ringChip').onclick = () => send({ t: 'stopfind' });
+
+// ================================================================ settings window
+function openSettings() {
+  $('lbOn').checked = S.lbOn; $('lbThr').value = S.lbThr; $('lbDelay').value = S.lbDelay / 1000;
+  $('lostSec').value = S.lostSec; $('pw').value = S.pw;
+  $('settingsDlg').showModal();
+}
+$('settingsBtn').onclick = openSettings;
+$('settingsClose').onclick = () => $('settingsDlg').close();
+$('lbOn').onchange = () => { setS('lbOn', $('lbOn').checked ? 'on' : 'off'); if (!$('lbOn').checked) lostAlarmStop(); };
+$('lbThr').onchange = () => { setS('lbThr', $('lbThr').value); showSignal(); };
+$('lbDelay').onchange = () => setS('lbDelay', $('lbDelay').value);
+$('lostSec').onchange = () => setS('lostSec', $('lostSec').value);
+$('pw').onchange = () => setS('pw', $('pw').value);
+$('lbUseNow').onclick = () => {
+  if (currentRssi === null) { toast('No signal reading yet'); return; }
+  $('lbThr').value = currentRssi; setS('lbThr', String(currentRssi)); showSignal(); toast('Left-behind limit: ' + currentRssi + ' dBm');
+};
+
+// ================================================================ buttons, tabs
+$('connectBtn').onclick = () => {
+  unlockAudio();
+  if (demo) { demo.connect(); return; }
+  if (Ble.device && !Ble.keepTrying) Ble.startTrying(); else Ble.choose();
+};
+$('disconnectBtn').onclick = () => { lostAlarmStop(); if (demo) demo.disconnect(); else Ble.disconnect(); };
+$('copyLast').onclick = () => lastScan && copyText(lastScan.b);
+$('filter').oninput = renderNotes;
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $('notesView').hidden = tab === 'L';
+  $('logView').hidden = tab !== 'L';
+  if (tab === 'L') $('logQuery').focus(); else renderNotes();
+});
+
+// ================================================================ demo: a simulated device, for trying the page
+class DemoDevice {
+  constructor() {
+    let id = 1; const now = Date.now();
+    const mk = (loc, text, color, en = true) => ({ id: id++, loc, text, title: text.split('\n')[0], custom: false, color, en, cr: now - 3600e3, lm: 0, ord: now - id });
+    this.notes = [
+      mk('D', 'NFR234CR3\nShampoo 300 ML RED ROSE\n123132543465356\n1232131232312323\n123214343535446\n\nNFR901BL2\nBody Wash 500 ML BLUE OCEAN\n4006381333931\n4006381333948\n4006381333955', PRESETS[4]),
+      mk('D', 'XYZ100\nToothpaste 75 ML MINT\n8710447348925', 0),
+      mk('D', 'tester\ntester description\n123412341234', PRESETS[7], false),
+      mk('O', 'NFR555YE9\nHand Soap 200 ML LEMON\n7622210449283', PRESETS[2]),
+    ];
+    this.nextId = id;
+    this.log = [];
+    this.codes = ['4006381333948', '8710447348925', '7622210449283', '5901234123457', 'https://example.com/qr/item/42', '123412341234'];
+    this.connected = false; this.ringing = false;
+  }
+  connect() {
+    this.connected = true;
+    setStatus('Connecting to Demo device…', 'busy');
+    setTimeout(() => {
+      linkUp('Demo device');
+      this.rssiTimer = setInterval(() => this.connected && onMessage({ t: 'rssi', v: Number($('demoRssi').value) + Math.round(Math.random() * 4 - 2) }), 1000);
+    }, 400);
+  }
+  disconnect(unexpected = false) {
+    this.connected = false; clearInterval(this.rssiTimer); linkDown(unexpected);
+    if (unexpected) setTimeout(() => { if (!this.connected && demo === this) this.connect(); }, 15000);
+  }
+  push() { this.notes.sort((a, b) => b.ord - a.ord); onMessage({ t: 'notes', notes: this.notes.map(({ ord, ...n }) => n) }); }
+  scan(code) {
+    const b = code || this.codes[Math.floor(Math.random() * this.codes.length)], now = Date.now();
+    const m = this.notes.filter(n => n.en && n.text.split('\n').some(l => l.trim() === b));
+    const lvl = m.some(n => n.loc === 'D') ? 'E' : 'N';
+    m.forEach(n => { n.lm = now; n.ord = now; });
+    const last = this.log[0];
+    if (last && last.b === b) { last.l = now; lvl === 'E' ? last.m++ : last.n++; }
+    else this.log.unshift({ id: this.log.length + 1, b, f: now, l: now, m: lvl === 'E' ? 1 : 0, p: 0, n: lvl === 'E' ? 0 : 1 });
+    onMessage({ t: 'scan', b, lvl, ts: now, m: m.map(n => n.id) });
+    if (m.length) setTimeout(() => this.push(), 1500);
+  }
+  receive(msg) {
+    const n = this.notes.find(x => x.id === msg.id), now = Date.now();
+    switch (msg.t) {
+      case 'sync': this.push(); onMessage({ t: 'alarm', on: this.ringing }); break;
+      case 'add': this.notes.push({ id: this.nextId++, loc: msg.loc, text: msg.text, title: msg.text.split('\n')[0], custom: false, color: msg.color, en: true, cr: now, lm: 0, ord: now }); this.push(); break;
+      case 'edit': if (n) { n.text = msg.text; n.color = msg.color; if (!n.custom) n.title = msg.text.split('\n')[0]; this.push(); } break;
+      case 'title': if (n) { n.custom = !!msg.title; n.title = msg.title || n.text.split('\n')[0]; this.push(); } break;
+      case 'en': if (n) { n.en = msg.on; this.push(); } break;
+      case 'del': this.notes = this.notes.filter(x => x !== n); this.push(); break;
+      case 'copy': {
+        const to = n.loc === 'D' ? 'O' : 'D', targets = this.notes.filter(x => x.loc === to);
+        const same = targets.find(x => x.title.toLowerCase() === n.title.toLowerCase());
+        if (targets.some(x => x.text === n.text)) onMessage({ t: 'copyres', r: 'same', id: n.id });
+        else if (same) onMessage({ t: 'copyres', r: 'conflict', id: n.id, other: same.id, title: same.title });
+        else { this.notes.push({ ...n, id: this.nextId++, loc: to, ord: now }); this.push(); onMessage({ t: 'copyres', r: 'copied', id: n.id }); }
+        break;
+      }
+      case 'over': { const o = this.notes.find(x => x.id === msg.other); if (o && n) { o.text = n.text; o.title = n.title; o.color = n.color; o.ord = now; this.push(); } break; }
+      case 'log': {
+        const q = msg.q.toLowerCase(), all = this.log.filter(e => e.b.toLowerCase().includes(q));
+        onMessage({ t: 'logres', q: msg.q, total: all.length, items: all.slice(0, 200) }); break;
+      }
+      case 'find': this.ringing = true; onMessage({ t: 'alarm', on: true }); toast('Demo: the device would ring now'); break;
+      case 'stopfind': this.ringing = false; onMessage({ t: 'alarm', on: false }); break;
+      case 'lb': if (msg.on) toast('Demo: the device buzzes and shows STOP'); break;
+    }
+  }
+}
+function startDemo() {
+  if (!demo) {
+    if (ready) Ble.disconnect();
+    demo = new DemoDevice();
+    $('demoBar').hidden = false;
+    // a few earlier scans, so the log has something to search
+    ['5901234123457', '4006381333948', '4006381333948', '1111222233334', '8710447348925', 'item in wrong location'].forEach(c => demo.scan(c));
+    lastScan = null; scanCount = 0; renderLast();
+  }
+  $('settingsDlg').close();
+  demo.connect();
+}
+$('demoBtn').onclick = startDemo;
+$('demoRssi').oninput = () => $('demoRssiText').textContent = $('demoRssi').value + ' dBm';
+$('demoScan').onclick = () => demo && demo.connected && demo.scan();
+$('demoDrop').onclick = () => demo && demo.connected && demo.disconnect(true);
+$('demoStop').onclick = () => demo && demo.connected && onMessage({ t: 'lbstop' });
+
+// ================================================================ start
+$('persistInfo').textContent = location.protocol === 'file:'
+  ? 'Opened as a saved file: Chrome may ask you to choose the device each time you open the page.'
+  : 'Chrome may remember the chosen device after a reload; otherwise click "Connect to device" again.';
+updateButtons(); renderNotes(); showSignal();
+if (/[?&]demo\b/.test(location.search)) startDemo();
+(async () => {   // reconnect without the popup if Chrome remembers the device
+  if (demo || !navigator.bluetooth || !navigator.bluetooth.getDevices) return;
+  try {
+    const list = await navigator.bluetooth.getDevices();
+    if (list.length && getS('auto') === 'on') { Ble.use(list[0]); Ble.startTrying(); }
+  } catch (e) {}
+})();
+window.addEventListener('beforeunload', () => setS('auto', !demo && (ready || Ble.keepTrying) ? 'on' : 'off'));
+</script>
+</body>
+</html>
