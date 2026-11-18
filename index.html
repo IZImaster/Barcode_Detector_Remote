@@ -235,6 +235,14 @@ dialog::backdrop { background: rgba(20,16,30,.45); }
   </section>
 
   <section>
+    <h3>Device</h3>
+    <div class="row">
+      <button id="pinResetBtn" class="small danger" disabled>Reset device Settings PIN to 0000</button>
+      <span class="note">If you forgot the PIN of the app's Settings tab. The device shows a notice that it was reset.</span>
+    </div>
+  </section>
+
+  <section>
     <h3>Connection</h3>
     <div class="row">Link password <input type="password" id="pw" style="max-width:220px" placeholder="only if set on the device"></div>
     <div class="note" id="persistInfo"></div>
@@ -486,6 +494,7 @@ function updateButtons() {
   $('addBtn').disabled = !ready;
   $('logSearch').disabled = !ready;
   $('findBtn').disabled = !ready;
+  $('pinResetBtn').disabled = !ready;
   document.querySelectorAll('[data-needs-link]').forEach(b => b.disabled = !ready);
 }
 
@@ -499,6 +508,8 @@ function onMessage(msg) {
     case 'lbstop': if (lostReason) { snoozed = true; lostAlarmStop(false); toast('Stopped on the device'); } break;
     case 'logres': showLogResults(msg); break;
     case 'copyres': onCopyResult(msg); break;
+    case 'logctxres': copyLogContext(msg); break;
+    case 'pinreset': toast(msg.ok ? 'Device Settings PIN is now 0000' : 'PIN reset failed'); break;
   }
 }
 
@@ -668,9 +679,23 @@ function showLogResults(msg) {
     mid.append(el('div', 'code', e.b), el('div', 'meta', when));
     const counts = el('span', 'counts', [e.m && '✓' + e.m, e.p && '~' + e.p, e.n && '✗' + e.n].filter(Boolean).join(' '));
     const line = fmtDate(e.f) + ' ' + fmtTime(e.f) + (count > 1 ? '–' + fmtTime(e.l) : '') + '  ' + e.b + (count > 1 ? '  (×' + count + ')' : '');
-    r.append(dot, mid, counts, btn('Copy', () => copyText(e.b)), btn('Copy with date', () => copyText(line)));
+    const ctx = btn('Copy ±4', () => send({ t: 'logctx', id: e.id }));
+    ctx.title = 'Copy this entry with the 4 before and 4 after it (9 lines, plain text)';
+    r.append(dot, mid, counts, btn('Copy', () => copyText(e.b)), btn('Copy with date', () => copyText(line)), ctx);
     return r;
   }));
+}
+/** One plain-text line per log entry: date, times, barcode, how often, and the match results. */
+function logTextLine(e, found) {
+  const count = e.m + e.p + e.n;
+  const when = fmtDate(e.f) + ' ' + fmtTime(e.f) + (count > 1 ? '–' + fmtTime(e.l) : '');
+  const result = 'match ' + e.m + ', partial ' + e.p + ', no match ' + e.n;
+  return when + ' | ' + e.b + ' | scanned ' + count + '× | ' + result + (found ? ' | ◄ found' : '');
+}
+function copyLogContext(msg) {
+  if (!msg.items || !msg.items.length) { toast('Entry not found on the device'); return; }
+  copyText(msg.items.map(e => logTextLine(e, e.id === msg.id)).join('\n'));
+  toast('Copied ' + msg.items.length + ' log lines');
 }
 $('logSearch').onclick = runLogSearch;
 $('logQuery').addEventListener('keydown', e => { if (e.key === 'Enter') runLogSearch(); });
@@ -769,6 +794,9 @@ function setFindRinging(on) {
   $('ringChip').hidden = !on;
 }
 $('findBtn').onclick = () => send({ t: findRinging ? 'stopfind' : 'find' });
+$('pinResetBtn').onclick = () => {
+  if (confirm('Reset the Settings PIN on ' + ($('statusText').textContent.replace('Connected to ', '') || 'the device') + ' to 0000?')) send({ t: 'pinreset' });
+};
 $('ringChip').onclick = () => send({ t: 'stopfind' });
 
 // ================================================================ settings window
@@ -842,7 +870,7 @@ class DemoDevice {
     m.forEach(n => { n.lm = now; n.ord = now; });
     const last = this.log[0];
     if (last && last.b === b) { last.l = now; lvl === 'E' ? last.m++ : last.n++; }
-    else this.log.unshift({ id: this.log.length + 1, b, f: now, l: now, m: lvl === 'E' ? 1 : 0, p: 0, n: lvl === 'E' ? 0 : 1 });
+    else this.log.unshift({ id: (this.log[0] ? this.log[0].id : 0) + 1, b, f: now, l: now, m: lvl === 'E' ? 1 : 0, p: 0, n: lvl === 'E' ? 0 : 1 });
     onMessage({ t: 'scan', b, lvl, ts: now, m: m.map(n => n.id) });
     if (m.length) setTimeout(() => this.push(), 1500);
   }
@@ -868,6 +896,11 @@ class DemoDevice {
         const q = msg.q.toLowerCase(), all = this.log.filter(e => e.b.toLowerCase().includes(q));
         onMessage({ t: 'logres', q: msg.q, total: all.length, items: all.slice(0, 200) }); break;
       }
+      case 'logctx': {
+        const asc = [...this.log].sort((a, b) => a.id - b.id), i = asc.findIndex(e => e.id === msg.id);
+        onMessage({ t: 'logctxres', id: msg.id, items: i < 0 ? [] : asc.slice(Math.max(0, i - 4), i + 5) }); break;
+      }
+      case 'pinreset': onMessage({ t: 'pinreset', ok: true }); break;
       case 'find': this.ringing = true; onMessage({ t: 'alarm', on: true }); toast('Demo: the device would ring now'); break;
       case 'stopfind': this.ringing = false; onMessage({ t: 'alarm', on: false }); break;
       case 'lb': if (msg.on) toast('Demo: the device buzzes and shows STOP'); break;
